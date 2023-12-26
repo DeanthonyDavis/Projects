@@ -1,0 +1,102 @@
+import random
+
+MAX_LINES = 3
+MAX_BET = 100
+MIN_BET = 1
+
+ROWS = 3
+COLS = 3
+
+symbol_count = {
+    "A": 2,
+    "B": 4,
+    "C": 6,
+    "D": 8
+}
+
+
+def get_slot_machine_spin(rows, cols, symbols):
+    all_symbols = [symbol for symbol, count in symbols.items() for _ in range(count)]
+    columns = [random.sample(all_symbols, rows) for _ in range(cols)]
+    return columns
+
+
+def print_slot_machine(columns):
+    for row in range(len(columns[0])):
+        for column in columns:
+            print(column[row], end=" | ")
+        print()
+
+
+def deposit():
+    while True:
+        amount = input("What would you like to deposit? $")
+        if amount.isdigit() and int(amount) > 0:
+            return int(amount)
+        print("Amount must be a positive number.")
+
+
+def get_number_of_lines():
+    while True:
+        lines = input(f"Enter the number of lines to bet on (1-{MAX_LINES}): ")
+        if lines.isdigit() and 1 <= int(lines) <= MAX_LINES:
+            return int(lines)
+        print("Please enter a valid number of lines.")
+90
+
+
+def get_bet():
+    while True:
+        amount = input(f"What would you like to bet on each line? (${MIN_BET} - ${MAX_BET}): ")
+        if amount.isdigit() and MIN_BET <= int(amount) <= MAX_BET:
+            return int(amount)
+        print(f"Amount must be between ${MIN_BET} and ${MAX_BET}.")
+
+
+def calculate_payout(columns, lines, bet):
+    payout = 0
+    for line in range(lines):
+        line_symbols = [columns[i][line] for i in range(len(columns))]
+        unique_symbols = list(set(line_symbols))
+        if len(unique_symbols) == 1:
+            payout += bet * symbol_count[unique_symbols[0]]
+    return payout
+
+
+def play_slot_machine(balance, lines, bet):
+    total_bet = bet * lines
+    if total_bet > balance:
+        print(f"You do not have enough to bet that amount, your current balance is: ${balance}")
+        return balance
+
+    balance -= total_bet
+    columns = get_slot_machine_spin(ROWS, COLS, symbol_count)
+    print_slot_machine(columns)
+    payout = calculate_payout(columns, lines, bet)
+    balance += payout
+    print(f"You are betting ${bet} on {lines} lines. Total bet is equal to: ${total_bet}")
+    if payout > 0:
+        print(f"Congratulations, you won ${payout}!")
+    else:
+        print("Sorry, you didn't win this time.")
+    print(f"Your new balance is: ${balance}")
+    return balance
+
+
+def main():
+    balance = deposit()
+    while balance > 0:
+        lines = get_number_of_lines()
+        bet = get_bet()
+        balance = play_slot_machine(balance, lines, bet)
+        if balance > 0:
+            choice = input("Do you want to play again (y/n)? ")
+            if choice.lower() != 'y':
+                print(f"Your final balance is: ${balance}. Goodbye!")
+                break
+        else:
+            print("You have run out of balance. Thank you for playing!")
+            break
+
+
+main()
