@@ -1,0 +1,176 @@
+from flask import Flask, request, render_template
+from ibapi.client import EClient
+from ibapi.wrapper import EWrapper
+from ibapi.contract import Contract
+import threading
+import logging
+from datetime import datetime, timedelta
+
+# Configure logging
+logging.basicConfig(filename='trading_bot.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
+app = Flask(__name__)
+
+class TestApp(EWrapper, EClient):
+    def __init__(self):
+        EClient.__init__(self, self)
+        EWrapper.__init__(self)
+        self.data = []  # Store received data here
+        self.active = True  # Flag to control trading hours
+        self.stop_loss_ticks = 1
+        self.take_profit_ticks = 2
+        self.trade_size = 0.01  # Default trade size in lots
+        self.account_balance = 100000  # Example starting account balance
+
+    def error(self, reqId, errorCode, errorString):
+        error_message = f"Error: {reqId} - Code: {errorCode} - Message: {errorString}"
+        logging.error(error_message)
+        print(error_message)
+
+    def historicalData(self, reqId, bar):
+        try:
+            print("HistoricalData. ", reqId, " Date:", bar.date, " Open:", bar.open, " High:", bar.high, " Low:", bar.low, " Close:", bar.close, " Volume:", bar.volume, " Count:", bar.barCount, " WAP:", bar.average)
+            self.data.append([bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume])
+
+            if len(self.data) >= 3:
+                self.evaluate_strategy()
+        except Exception as e:
+            error_message = f"Exception in historicalData: {str(e)}"
+            logging.error(error_message)
+            print(error_message)
+
+    def evaluate_strategy(self):
+        try:
+            # Check if the bot is active based on time and day filters
+            if self.is_trading_time() and self.is_trading_day():
+                # Get the latest three bars
+                last_three_bars = self.data[-3:]
+
+                # Extract relevant data for easier access
+                first_bar, second_bar, third_bar = last_three_bars
+                first_close, first_low, first_high = first_bar[4], first_bar[3], first_bar[2]
+                second_close, second_low, second_high = second_bar[4], second_bar[3], second_bar[2]
+                third_close, third_low, third_high = third_bar[4], third_bar[3], third_bar[2]
+                third_open = third_bar[1]  # Added this line to get the open price of the third bar
+
+                # Check for buy condition
+                if first_close > second_close and second_close > third_close \
+                        and third_close > third_open and third_close > second_high and third_close > first_high \
+                        and third_close > self.get_ema():
+                    # Calculate position size based on the 1% risk rule
+                    risk_percentage = 0.01
+                    risk_per_trade = self.account_balance * risk_percentage
+                    stop_loss_amount = abs(third_low - third_close)
+                    position_size = risk_per_trade / stop_loss_amount
+
+                    # Adjust position size to match lot sizes (e.g., micro lots)
+                    position_size = round(position_size, 2)
+
+                    # Enter buy trade
+                    print(f"Enter Buy Trade - Size: {position_size} lots")
+        except Exception as e:
+            error_message = f"Exception in evaluate_strategy: {str(e)}"
+            logging.error(error_message)
+            print(error_message)
+
+    def get_ema(self):
+        try:
+            if len(self.data) < 10:
+                return None  # Not enough data to calculate EMA
+
+            # Extract the closing prices for the last 10 bars
+            closing_prices = [bar[4] for bar in self.data[-10:]]
+
+            # Calculate the EMA
+            alpha = 2 / (10 + 1)
+            ema = closing_prices[0]
+
+            for price in closing_prices[1:]:
+                ema = alpha * price + (1 - alpha) * ema
+
+            return ema
+        except Exception as e:
+            error_message = f"Exception in get_ema: {str(e)}"
+            logging.error(error_message)
+            print(error_message)
+
+    def stop(self):
+        try:
+            self.disconnect()
+        except Exception as e:
+            error_message = f"Exception in stop: {str(e)}"
+            logging.error(error_message)
+            print(error_message)
+
+    def is_trading_time(self):
+        # Add time-based filter (e.g., trade from 8 AM to 1 PM)
+        now = datetime.now()
+        trading_start_time = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        trading_end_time = now.replace(hour=13, minute=0, second=0, microsecond=0)
+        return trading_start_time <= now <= trading_end_time
+
+    def is_trading_day(self):
+        # Add day-of-week filter (e.g., trade only on weekdays)
+        return datetime.today().weekday() < 5  # Monday to Friday
+
+# Sample Dashboard Route
+@app.route('/dashboard')
+def dashboard():
+    # Get and display relevant information from the trading bot
+    return render_template('dashboard.html', data=app.data, active=app.active, trade_size=app.trade_size)
+
+def websocket_con():
+    try:
+        app = TestApp()
+        app.connect("paperapi.ibkr.com", 4002, 0)  # Use Paper (Demo) Trading Server details
+
+        contract = Contract()
+        contract.symbol = "MES"
+        contract.secType = "FUT"
+        contract.exchange = "GLOBEX"
+        contract.currency = "USD"
+        contract.lastTradeDateOrContractMonth = "202206"
+
+        app.reqHistoricalData(1, contract, "", "1 D", "5 mins", "TRADES", 1, 1, False, [])
+
+        app.run(port=5002)  # Change the port number
+    except Exception as e:
+        error_message = f"Exception in websocket_con: {str(e)}"
+        logging.error(error_message)
+        print(error_message)
+
+@app.route('/webhook/tradingview', methods=['POST'])
+def tradingview_webhook():
+    try:
+        # Extract and process the alert data from the POST request
+        alert_data = request.get_json()
+
+        # Extract relevant information from the alert
+        symbol = alert_data['ticker']
+        condition = alert_data['condition']
+        strategy = alert_data['strategy']
+
+        # Implement your logic to process the alert and trigger actions based on the defined criteria
+        print(f"Received TradingView Alert - Symbol: {symbol}, Condition: {condition}, Strategy: {strategy}")
+
+        # Example: Trigger your trading strategy based on the alert information
+        # You may want to communicate with the TestApp instance or trigger specific actions based on the alert.
+    except Exception as e:
+        error_message = f"Exception in tradingview_webhook: {str(e)}"
+        logging.error(error_message)
+        print(error_message)
+
+    return 'Webhook received and processed', 200
+
+if __name__ == '__main__':
+    try:
+        # Start the real-time data retrieval in a separate thread
+        con_thread = threading.Thread(target=websocket_con, daemon=True)
+        con_thread.start()
+
+        # Run the Flask web server on a different port
+        app.run(host='0.0.0.0', port=5002)  # Change the port number
+    except Exception as e:
+        error_message = f"Exception in main: {str(e)}"
+        logging.error(error_message)
+        print(error_message)
